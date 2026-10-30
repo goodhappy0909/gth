@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>베어링 상태 모니터링 & 고급 통계 시뮬레이터</title>
+  <!-- 온라인 CDN (CDN 접근 불가 시 로컬 안내 표시됨) -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --temp-color: #ef4444;
+      --vib-color: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 24px; }
+    .header { margin-bottom: 20px; }
+    .header h1 { font-size: 1.5rem; font-weight: 700; }
+    .header p { color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; }
+
+    #statusBox {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .status-ok { color: #4ade80; font-weight: 600; }
+    .status-warn { color: #facc15; font-weight: 600; }
+    .status-err { color: #f87171; font-weight: 600; }
+
+    .control-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-group label { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+    input[type="file"], select {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .metric-card h3 { font-size: 1rem; margin-bottom: 12px; }
+    .stats-items {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .stat-item {
+      background: #0f172a;
+      border-radius: 6px;
+      padding: 8px 10px;
+      border-left: 3px solid var(--border);
+    }
+    .stat-item.temp { border-left-color: var(--temp-color); }
+    .stat-item.vib { border-left-color: var(--vib-color); }
+    .stat-label { font-size: 0.75rem; color: var(--text-muted); }
+    .stat-value { font-size: 1.1rem; font-weight: 700; margin-top: 2px; }
+
+    .chart-container {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .chart-header {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--text);
+    }
+    .chart-tip { font-size: 0.8rem; color: var(--text-muted); font-weight: 400; }
+    .sub-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 900px) {
+      .sub-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>⚙️ 베어링 상태 모니터링 & 고급 통계 시뮬레이터</h1>
+    <p>강력한 CSV 자동 파싱 · 휠 줌(Zoom) & 패닝(Pan) · 다변량 상관분석</p>
+  </div>
+
+  <div id="statusBox">
+    <span id="statusMsg">대기 중: CSV 파일을 선택해 주세요.</span>
+    <span id="libCheck" style="font-size:0.8rem;">엔진 로드 확인 중...</span>
+  </div>
+
+  <!-- 컨트롤 패널 -->
+  <div class="control-panel">
+    <div class="control-group">
+      <label>1. CSV 파일 지정</label>
+      <input type="file" id="fileInput" accept=".csv, .txt, .dat">
+    </div>
+    <div class="control-group">
+      <label>2. 온도 (Temperature) 컬럼</label>
+      <select id="tempSelect"><option value="">CSV 로드 필요</option></select>
+    </div>
+    <div class="control-group">
+      <label>3. 진동 (Vibration) 컬럼</label>
+      <select id="vibSelect"><option value="">CSV 로드 필요</option></select>
+    </div>
+    <div class="control-group">
+      <label>4. 시간축 / 인덱스</label>
+      <select id="timeSelect"><option value="__index__">순차 인덱스 (기본)</option></select>
+    </div>
+  </div>
+
+  <!-- 통계 요약 카드 -->
+  <div class="metric-grid">
+    <div class="metric-card">
+      <h3 style="color: var(--temp-color);">🌡️ 온도 (Temperature) 통계량</h3>
+      <div class="stats-items">
+        <div class="stat-item temp"><div class="stat-label">평균 (Mean)</div><div class="stat-value" id="t-mean">-</div></div>
+        <div class="stat-item temp"><div class="stat-label">표준편차 (Std)</div><div class="stat-value" id="t-std">-</div></div>
+        <div class="stat-item temp"><div class="stat-label">중앙값 (Median)</div><div class="stat-value" id="t-median">-</div></div>
+        <div class="stat-item temp"><div class="stat-label">IQR (Q3 - Q1)</div><div class="stat-value" id="t-iqr">-</div></div>
+      </div>
+    </div>
+    <div class="metric-card">
+      <h3 style="color: var(--vib-color);">⚡ 진동 (Vibration) 특성 지표</h3>
+      <div class="stats-items">
+        <div class="stat-item vib"><div class="stat-label">RMS 실효치</div><div class="stat-value" id="v-rms">-</div></div>
+        <div class="stat-item vib"><div class="stat-label">첨도 (Kurtosis)</div><div class="stat-value" id="v-kurt">-</div></div>
+        <div class="stat-item vib"><div class="stat-label">왜도 (Skewness)</div><div class="stat-value" id="v-skew">-</div></div>
+        <div class="stat-item vib"><div class="stat-label">최대 충격치 (Peak)</div><div class="stat-value" id="v-peak">-</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 듀얼 트렌드 시계열 차트 -->
+  <div class="chart-container">
+    <div class="chart-header">
+      <span>📈 시계열 듀얼 트렌드</span>
+      <span class="chart-tip">💡 휠 굴림: 줌 | 좌클릭 드래그: 시간대 이동 | 더블클릭: 원본 복원</span>
+    </div>
+    <div id="trendChart" style="width: 100%; height: 420px;"></div>
+  </div>
+
+  <!-- 상관분석 & 박스플롯 -->
+  <div class="sub-grid">
+    <div class="chart-container">
+      <div class="chart-header">
+        <span>🔗 온도 vs 진동 상관분석</span>
+        <span id="corrValue" class="chart-tip">상관계수: -</span>
+      </div>
+      <div id="scatterChart" style="width: 100%; height: 350px;"></div>
+    </div>
+    <div class="chart-container">
+      <div class="chart-header">
+        <span>📦 이상치(Outlier) 분포 (IQR 기준)</span>
+      </div>
+      <div id="boxChart" style="width: 100%; height: 350px;"></div>
+    </div>
+  </div>
+
+  <script>
+    let rawData = [];
+    let headers = [];
+
+    // 라이브러리 정상 로드 여부 검사
+    window.addEventListener('DOMContentLoaded', () => {
+      const libStatus = document.getElementById('libCheck');
+      const hasPlotly = typeof Plotly !== 'undefined';
+      const hasPapa = typeof Papa !== 'undefined';
+
+      if (hasPlotly && hasPapa) {
+        libStatus.innerHTML = '<span class="status-ok">● 엔진 준비 완료</span>';
+      } else {
+        libStatus.innerHTML = '<span class="status-err">● 스크립트 로드 실패 (인터넷 연결 필요)</span>';
+        setStatus('인터넷 연결이 차단되어 차트 라이브러리(Plotly)를 받지 못했습니다.', 'err');
+      }
+    });
+
+    function setStatus(text, type='warn') {
+      const el = document.getElementById('statusMsg');
+      el.className = `status-${type}`;
+      el.innerText = text;
+    }
+
+    // 문자열에 섞인 공백/특수기호 제거 후 실수 변환
+    function cleanNumber(val) {
+      if (typeof val === 'number') return isNaN(val) ? null : val;
+      if (typeof val === 'string') {
+        const cleaned = val.trim().replace(/[^0-9.-]/g, '');
+        if (cleaned === '' || cleaned === '-' || cleaned === '.') return null;
+        const n = parseFloat(cleaned);
+        return isNaN(n) ? null : n;
+      }
+      return null;
+    }
+
+    // 통계 연산
+    function getStats(arr) {
+      const n = arr.length;
+      if (n === 0) return { mean: "0", std: "0", median: "0", iqr: "0", rms: "0", skew: "0", kurt: "0", max: "0" };
+
+      const mean = arr.reduce((a, b) => a + b, 0) / n;
+      const std = Math.sqrt(arr.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (n - 1 || 1));
+      const sorted = [...arr].sort((a, b) => a - b);
+      const median = n % 2 === 0 ? (sorted[n/2 - 1] + sorted[n/2]) / 2 : sorted[Math.floor(n/2)];
+      const q1 = sorted[Math.floor(n * 0.25)];
+      const q3 = sorted[Math.floor(n * 0.75)];
+      const rms = Math.sqrt(arr.reduce((acc, v) => acc + v * v, 0) / n);
+
+      let m3 = 0, m4 = 0;
+      for (let i = 0; i < n; i++) {
+        const diff = (arr[i] - mean) / (std || 1);
+        m3 += Math.pow(diff, 3);
+        m4 += Math.pow(diff, 4);
+      }
+      const skew = (n > 2) ? (n / ((n - 1) * (n - 2))) * m3 : 0;
+      const kurt = (n > 3) ? (n * (n + 1) / ((n - 1) * (n - 2) * (n - 3))) * m4 - (3 * Math.pow(n - 1, 2) / ((n - 2) * (n - 3))) : 0;
+
+      return {
+        mean: mean.toFixed(2),
+        std: std.toFixed(2),
+        median: median.toFixed(2),
+        iqr: (q3 - q1).toFixed(2),
+        rms: rms.toFixed(3),
+        skew: isNaN(skew) ? "0.00" : skew.toFixed(2),
+        kurt: isNaN(kurt) ? "0.00" : kurt.toFixed(2),
+        max: Math.max(...arr).toFixed(2)
+      };
+    }
+
+    function calculatePearson(x, y) {
+      const n = Math.min(x.length, y.length);
+      if (n === 0) return 0;
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+      for (let i = 0; i < n; i++) {
+        sumX += x[i];
+        sumY += y[i];
+        sumXY += x[i] * y[i];
+        sumX2 += x[i] * x[i];
+        sumY2 += y[i] * y[i];
+      }
+      const num = n * sumXY - sumX * sumY;
+      const den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+      return den === 0 ? 0 : num / den;
+    }
+
+    // 파일 로드 이벤트
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setStatus(`파일 분석 중... (${file.name})`, 'warn');
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: 'greedy',
+        delimiter: "", // 쉼표, 탭, 세미콜론 등 자동 판별
+        complete: function(results) {
+          if (!results.data || results.data.length === 0) {
+            setStatus('CSV 데이터가 비어 있거나 올바르지 않은 형식입니다.', 'err');
+            return;
+          }
+
+          rawData = results.data;
+          headers = (results.meta.fields || Object.keys(rawData[0])).filter(h => h && h.trim() !== '');
+
+          if (headers.length === 0) {
+            setStatus('CSV 파일에서 컬럼 헤더를 인식하지 못했습니다.', 'err');
+            return;
+          }
+
+          initDropdowns();
+          updateDashboard();
+        },
+        error: function(err) {
+          setStatus(`파싱 오류: ${err.message}`, 'err');
+        }
+      });
+    });
+
+    function initDropdowns() {
+      const tSelect = document.getElementById('tempSelect');
+      const vSelect = document.getElementById('vibSelect');
+      const timeSelect = document.getElementById('timeSelect');
+
+      tSelect.innerHTML = '';
+      vSelect.innerHTML = '';
+      timeSelect.innerHTML = '<option value="__index__">순차 인덱스 (기본)</option>';
+
+      headers.forEach(h => {
+        tSelect.add(new Option(h, h));
+        vSelect.add(new Option(h, h));
+        timeSelect.add(new Option(h, h));
+      });
+
+      // 컬럼 자동 매핑 (대소문자 무시)
+      const lower = headers.map(h => h.toLowerCase());
+      const tIdx = lower.findIndex(h => h.includes('temp') || h.includes('온도') || h.includes('t_') || h.includes('thermo'));
+      const vIdx = lower.findIndex(h => h.includes('vib') || h.includes('진동') || h.includes('acc') || h.includes('v_') || h.includes('sensor'));
+      const timeIdx = lower.findIndex(h => h.includes('time') || h.includes('date') || h.includes('시간') || h.includes('sec'));
+
+      if (tIdx !== -1) tSelect.selectedIndex = tIdx;
+      if (vIdx !== -1) vSelect.selectedIndex = vIdx;
+      else if (headers.length > 1) vSelect.selectedIndex = 1;
+      if (timeIdx !== -1) timeSelect.selectedIndex = timeIdx + 1;
+
+      tSelect.onchange = updateDashboard;
+      vSelect.onchange = updateDashboard;
+      timeSelect.onchange = updateDashboard;
+    }
+
+    function updateDashboard() {
+      if (!rawData || rawData.length === 0) return;
+
+      const tCol = document.getElementById('tempSelect').value;
+      const vCol = document.getElementById('vibSelect').value;
+      const timeCol = document.getElementById('timeSelect').value;
+
+      if (!tCol || !vCol) {
+        setStatus('온도와 진동 컬럼을 모두 선택해 주세요.', 'warn');
+        return;
+      }
+
+      const cleanTemps = [];
+      const cleanVibs = [];
+      const cleanX = [];
+
+      for (let i = 0; i < rawData.length; i++) {
+        const row = rawData[i];
+        const tVal = cleanNumber(row[tCol]);
+        const vVal = cleanNumber(row[vCol]);
+
+        if (tVal !== null && vVal !== null) {
+          cleanTemps.push(tVal);
+          cleanVibs.push(vVal);
+          cleanX.push(timeCol === '__index__' ? i : (row[timeCol] ?? i));
+        }
+      }
+
+      if (cleanTemps.length === 0) {
+        setStatus(`선택된 [${tCol}], [${vCol}] 컬럼에서 유효한 숫자를 읽지 못했습니다. 컬럼을 직접 변경해 보세요.`, 'err');
+        return;
+      }
+
+      setStatus(`총 ${cleanTemps.length.toLocaleString()}건 데이터 분석 완료.`, 'ok');
+
+      // 1. 통계 수치 출력
+      const tStat = getStats(cleanTemps);
+      const vStat = getStats(cleanVibs);
+
+      document.getElementById('t-mean').innerText = tStat.mean;
+      document.getElementById('t-std').innerText = tStat.std;
+      document.getElementById('t-median').innerText = tStat.median;
+      document.getElementById('t-iqr').innerText = tStat.iqr;
+
+      document.getElementById('v-rms').innerText = vStat.rms;
+      document.getElementById('v-kurt').innerText = vStat.kurt;
+      document.getElementById('v-skew').innerText = vStat.skew;
+      document.getElementById('v-peak').innerText = vStat.max;
+
+      // 브라우저 렌더링 최적화 (3만 개 초과 시 시각화용 다운샘플링)
+      let plotX = cleanX;
+      let plotT = cleanTemps;
+      let plotV = cleanVibs;
+      const MAX_POINTS = 30000;
+
+      if (cleanTemps.length > MAX_POINTS) {
+        const step = Math.ceil(cleanTemps.length / MAX_POINTS);
+        plotX = cleanX.filter((_, i) => i % step === 0);
+        plotT = cleanTemps.filter((_, i) => i % step === 0);
+        plotV = cleanVibs.filter((_, i) => i % step === 0);
+      }
+
+      // 2. 듀얼 트렌드 시계열 차트
+      const darkLayoutCommon = {
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        font: { color: '#94a3b8' },
+        margin: { l: 45, r: 45, t: 30, b: 40 }
+      };
+
+      const trendData = [
+        {
+          x: plotX, y: plotT,
+          name: `온도 (${tCol})`,
+          type: 'scattergl',
+          mode: 'lines',
+          line: { color: '#ef4444', width: 1.5 }
+        },
+        {
+          x: plotX, y: plotV,
+          name: `진동 (${vCol})`,
+          type: 'scattergl',
+          mode: 'lines',
+          yaxis: 'y2',
+          line: { color: '#38bdf8', width: 1.2 },
+          opacity: 0.8
+        }
+      ];
+
+      const trendLayout = {
+        ...darkLayoutCommon,
+        dragmode: 'pan',
+        hovermode: 'x unified',
+        legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: 1.1 },
+        xaxis: {
+          gridcolor: '#334155',
+          rangeslider: { visible: true, thickness: 0.08, bgcolor: '#1e293b' }
+        },
+        yaxis: {
+          title: '온도',
+          titlefont: { color: '#ef4444' },
+          tickfont: { color: '#ef4444' },
+          gridcolor: '#334155'
+        },
+        yaxis2: {
+          title: '진동',
+          titlefont: { color: '#38bdf8' },
+          tickfont: { color: '#38bdf8' },
+          overlaying: 'y',
+          side: 'right',
+          showgrid: false
+        }
+      };
+
+      Plotly.newPlot('trendChart', trendData, trendLayout, { scrollZoom: true, responsive: true, displaylogo: false });
+
+      // 3. 상관분석 산점도
+      const r = calculatePearson(cleanTemps, cleanVibs);
+      document.getElementById('corrValue').innerText = `피어슨 상관계수 r = ${r.toFixed(3)}`;
+
+      const scatterData = [{
+        x: plotT, y: plotV,
+        mode: 'markers',
+        type: 'scattergl',
+        marker: { color: '#818cf8', size: 4, opacity: 0.4 }
+      }];
+
+      const scatterLayout = {
+        ...darkLayoutCommon,
+        xaxis: { title: tCol, gridcolor: '#334155' },
+        yaxis: { title: vCol, gridcolor: '#334155' }
+      };
+
+      Plotly.newPlot('scatterChart', scatterData, scatterLayout, { scrollZoom: true, responsive: true, displaylogo: false });
+
+      // 4. 박스플롯
+      const boxData = [
+        { y: plotT, name: '온도', type: 'box', marker: { color: '#ef4444' }, boxpoints: 'outliers' },
+        { y: plotV, name: '진동', type: 'box', marker: { color: '#38bdf8' }, boxpoints: 'outliers' }
+      ];
+
+      Plotly.newPlot('boxChart', boxData, { ...darkLayoutCommon, yaxis: { gridcolor: '#334155' } }, { responsive: true, displaylogo: false });
+    }
+  </script>
+</body>
+</html>
